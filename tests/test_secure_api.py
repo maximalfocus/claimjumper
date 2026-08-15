@@ -74,6 +74,8 @@ def test_secure_rejections_are_uniform_and_preserve_state(
     assert len(request_id) == 24
     assert client.get("/state").content == before
     events = [json.loads(record.message) for record in caplog.records]
+    audit_evidence = client.get("/demo/audit-events").json()
+    assert audit_evidence == {"label": "FICTIONAL LOCAL DEMO", "count": 1}
     assert events == [
         {
             "event": "token_rejected",
