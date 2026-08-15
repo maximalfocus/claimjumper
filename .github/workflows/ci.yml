@@ -1,0 +1,20 @@
+name: verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned verification image
+        run: docker compose build verify
+      - name: Run repository verification boundary
+        run: docker compose run --rm verify
