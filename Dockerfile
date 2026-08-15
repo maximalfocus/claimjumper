@@ -14,7 +14,7 @@ RUN uv sync --frozen --no-install-project
 COPY src ./src
 COPY tests ./tests
 COPY scripts ./scripts
-COPY pyproject.toml uv.lock README.md compose.yaml Dockerfile ./
+COPY pyproject.toml uv.lock README.md LICENSE compose.yaml Dockerfile ./
 RUN uv sync --frozen && chmod +x scripts/*.sh
 
 USER 65532:65532

@@ -221,3 +221,18 @@ algorithm allowlists, and complete claim validation. Background standards: [OWAS
 Authentication](https://owasp.org/API-Security/editions/2023/en/0xa2-broken-authentication/),
 [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519.html), and
 [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html).
+
+## Security policy
+
+The three JWT flaws above are **intentional** and are not accepted as vulnerability reports. Every
+key, secret, token, user, and parcel here is a fictional demonstration value labelled `FICTIONAL
+LOCAL DEMO`, and nothing in this repository is hosted, deployed, or offered as a supported release.
+
+Anything genuinely unintended — a secure-verifier flaw that contradicts the documented policy, a
+containment escape from the local-only boundary, a real credential committed by mistake, or an
+external input path in the bounded recovery exercise — should be reported privately. See
+[`SECURITY.md`](SECURITY.md) for both reporting channels and the full scope boundary.
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 maximalfocus.
