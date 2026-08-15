@@ -28,6 +28,19 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         yield test_client
 
 
+@pytest.fixture
+def vulnerable_client(tmp_path: Path) -> Iterator[TestClient]:
+    application = create_app(
+        database_url=f"sqlite:///{tmp_path / 'vulnerable.db'}",
+        clock=fixed_clock(NOW),
+        verification_key=TEST_KEY,
+        mode="vulnerable",
+        allow_vulnerable=True,
+    )
+    with TestClient(application) as test_client:
+        yield test_client
+
+
 def verifier(client: TestClient) -> SecureVerifier:
     application = cast(FastAPI, client.app)
     return cast(SecureVerifier, application.state.verifier)

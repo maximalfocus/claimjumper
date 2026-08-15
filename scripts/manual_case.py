@@ -38,6 +38,8 @@ def main() -> None:
     case = parser.parse_args().case
 
     request("/demo/reset", method="POST")
+    _, health = request("/health")
+    mode = health["mode"]
     _, fixture_payload = request("/demo/fixtures")
     token = fixture_payload["tokens"][case]
     header_segment, claim_segment, _redacted_signature = token.split(".")
@@ -56,10 +58,15 @@ def main() -> None:
                     "signature": "[REDACTED]",
                 },
                 "configured_policy": {
-                    "algorithm": "HS256",
+                    "mode": mode,
+                    "algorithm": "HS256" if mode == "secure" else "HS256 or alg:none",
+                    "signature_verification": (
+                        "required" if mode == "secure" else "omitted only for alg:none"
+                    ),
+                    "expiration_enforced": mode == "secure",
                     "issuer": "https://issuer.northstar.invalid",
                     "audience": "northstar-parcel-api",
-                    "leeway_seconds": 0,
+                    "leeway_seconds": 0 if mode == "secure" else "not applied",
                 },
                 "verifier_verdict": "accepted" if status in {200, 403} else "rejected",
                 "http": {"status": status, "body": outcome},

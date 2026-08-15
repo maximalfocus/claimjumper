@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 import jwt
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -47,31 +47,34 @@ class SecureVerifier:
 
     def __init__(self, clock: Clock, key: bytes | None = None) -> None:
         self._clock = clock
-        self.__key = key if key is not None else secrets.token_bytes(32)
-        if len(self.__key) < 32:
+        self._key = key if key is not None else secrets.token_bytes(32)
+        if len(self._key) < 32:
             raise ValueError("secure verification key must contain at least 256 bits")
 
-    def verify(self, compact_token: str) -> Identity:
+    @staticmethod
+    def _header(compact_token: str) -> dict[str, Any]:
         try:
-            header = jwt.get_unverified_header(compact_token)
+            return jwt.get_unverified_header(compact_token)
         except jwt.PyJWTError as exc:
             raise AuthenticationError("malformed") from exc
-        if header.get("alg") != ALGORITHM:
-            raise AuthenticationError("algorithm_not_allowed")
 
+    def _decode_signed(self, compact_token: str) -> dict[str, Any]:
         try:
-            raw_claims = jwt.decode(
-                compact_token,
-                self.__key,
-                algorithms=[ALGORITHM],
-                audience=AUDIENCE,
-                issuer=ISSUER,
-                options={
-                    "require": list(REQUIRED_CLAIMS),
-                    "verify_exp": False,
-                    "verify_nbf": False,
-                    "verify_iat": False,
-                },
+            return cast(
+                dict[str, Any],
+                jwt.decode(
+                    compact_token,
+                    self._key,
+                    algorithms=[ALGORITHM],
+                    audience=AUDIENCE,
+                    issuer=ISSUER,
+                    options={
+                        "require": list(REQUIRED_CLAIMS),
+                        "verify_exp": False,
+                        "verify_nbf": False,
+                        "verify_iat": False,
+                    },
+                ),
             )
         except jwt.MissingRequiredClaimError as exc:
             raise AuthenticationError("missing_claim") from exc
@@ -84,17 +87,24 @@ class SecureVerifier:
         except jwt.PyJWTError as exc:
             raise AuthenticationError("invalid_token") from exc
 
+    def _identity(self, raw_claims: dict[str, Any], *, enforce_expiration: bool) -> Identity:
+        if any(claim not in raw_claims for claim in REQUIRED_CLAIMS):
+            raise AuthenticationError("missing_claim")
         try:
             claims = TokenClaims.model_validate(raw_claims)
         except ValidationError as exc:
             raise AuthenticationError("claim_schema") from exc
 
+        if claims.iss != ISSUER:
+            raise AuthenticationError("wrong_issuer")
+        if claims.aud != AUDIENCE:
+            raise AuthenticationError("wrong_audience")
         now = int(self._clock().timestamp())
         if claims.iat > now:
             raise AuthenticationError("issued_in_future")
         if claims.nbf > now:
             raise AuthenticationError("not_yet_valid")
-        if claims.exp <= now:
+        if enforce_expiration and claims.exp <= now:
             raise AuthenticationError("expired")
 
         user = USERS.get(claims.sub)
@@ -103,6 +113,12 @@ class SecureVerifier:
         if user.role.value != claims.role:
             raise AuthenticationError("inconsistent_role")
         return Identity(subject=user.subject, role=user.role)
+
+    def verify(self, compact_token: str) -> Identity:
+        header = self._header(compact_token)
+        if header.get("alg") != ALGORITHM:
+            raise AuthenticationError("algorithm_not_allowed")
+        return self._identity(self._decode_signed(compact_token), enforce_expiration=True)
 
     def issue_token(
         self,
@@ -131,7 +147,8 @@ class SecureVerifier:
         }
         if omit is not None:
             claims.pop(omit, None)
-        return jwt.encode(claims, signing_key or self.__key, algorithm=ALGORITHM)
+        resolved_key = self._key if signing_key is None else signing_key
+        return jwt.encode(claims, resolved_key, algorithm=ALGORITHM)
 
     def fixtures(self) -> FixtureTokens:
         now = self._clock()
@@ -153,3 +170,25 @@ class SecureVerifier:
             ),
             unsigned_dispatcher=jwt.encode(unsigned_claims, key="", algorithm="none"),
         )
+
+
+class VulnerableVerifier(SecureVerifier):
+    """Deliberately incomplete local-only verifier for two fixed teaching cases."""
+
+    def verify(self, compact_token: str) -> Identity:
+        header = self._header(compact_token)
+        algorithm = header.get("alg")
+        if algorithm == "none":
+            try:
+                raw_claims = jwt.decode(compact_token, options={"verify_signature": False})
+            except jwt.PyJWTError as exc:
+                raise AuthenticationError("invalid_token") from exc
+        elif algorithm == ALGORITHM:
+            raw_claims = self._decode_signed(compact_token)
+        else:
+            raise AuthenticationError("algorithm_not_allowed")
+
+        # INTENTIONALLY VULNERABLE: signature verification is absent for alg:none and
+        # expiration is not enforced. All shared schema, identity, and authorization
+        # checks remain active so these are the only contrasts in this slice.
+        return self._identity(raw_claims, enforce_expiration=False)

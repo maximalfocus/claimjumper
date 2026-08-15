@@ -22,7 +22,48 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     networks:
-      - demo
+      - secure
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 1s
+      timeout: 2s
+      retries: 10
+
+  vulnerable:
+    <<: *security
+    build:
+      context: .
+    command: ["uv", "run", "--no-sync", "uvicorn", "claimjumper.vulnerable_app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      ALLOW_VULNERABLE_DEMO: "${ALLOW_VULNERABLE_DEMO:-}"
+      CLAIMJUMPER_DATABASE_URL: sqlite:////data/claimjumper.db
+      CLAIMJUMPER_NOW: "2030-01-02T12:00:00Z"
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks:
+      - vulnerable
+    profiles: ["vulnerable"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 1s
+      timeout: 2s
+      retries: 10
+
+  walkthrough:
+    <<: *security
+    build:
+      context: .
+    entrypoint: ["python", "scripts/contrast_case.py"]
+    command: ["unsigned"]
+    depends_on:
+      secure:
+        condition: service_healthy
+      vulnerable:
+        condition: service_healthy
+    networks:
+      - secure
+      - vulnerable
+    profiles: ["vulnerable"]
 
   verify:
     <<: *security
@@ -33,5 +74,7 @@ services:
     profiles: ["tools"]
 
 networks:
-  demo:
+  secure:
+    internal: true
+  vulnerable:
     internal: true
