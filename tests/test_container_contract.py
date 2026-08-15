@@ -14,11 +14,20 @@ def service(config: dict[str, Any], name: str) -> dict[str, Any]:
 
 def test_secure_service_is_the_only_default_and_is_hardened() -> None:
     config = yaml.safe_load((ROOT / "compose.yaml").read_text())
-    assert set(config["services"]) == {"secure", "vulnerable", "walkthrough", "verify"}
+    assert set(config["services"]) == {
+        "secure",
+        "vulnerable",
+        "walkthrough",
+        "integrated",
+        "recovery",
+        "verify",
+    }
     assert "profiles" not in service(config, "secure")
     assert service(config, "verify")["profiles"] == ["tools"]
     assert service(config, "vulnerable")["profiles"] == ["vulnerable"]
     assert service(config, "walkthrough")["profiles"] == ["vulnerable"]
+    assert service(config, "integrated")["profiles"] == ["vulnerable"]
+    assert service(config, "recovery")["profiles"] == ["tools"]
 
     secure = service(config, "secure")
     assert secure["ports"] == ["127.0.0.1:8000:8000"]
@@ -45,6 +54,7 @@ def test_vulnerable_service_requires_two_opt_ins_and_has_no_external_egress() ->
     assert vulnerable["user"] == "65532:65532"
     assert vulnerable["cap_drop"] == ["ALL"]
     assert vulnerable["security_opt"] == ["no-new-privileges:true"]
+    assert service(config, "recovery")["network_mode"] == "none"
 
 
 def test_image_is_version_and_digest_pinned_and_runs_nonroot() -> None:

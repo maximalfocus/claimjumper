@@ -2,13 +2,22 @@
 
 `claimjumper` is a **FICTIONAL LOCAL DEMO** of JSON Web Token (JWT) verification for the Northstar
 Parcel Exchange. It places a secure verifier beside an explicitly gated vulnerable variant that
-demonstrates exactly two flaws: trusting an unsigned `alg:none` token and accepting a correctly
-signed but expired token. It contains no token forger, key-recovery tool, real target, or production
-identity system.
+demonstrates exactly three flaws:
 
-The fixture identities are courier `river`, dispatcher `mara`, and parcel `NPE-204`. A dispatcher may
-release the held parcel; a courier is authenticated and then denied. All state lives in a disposable
-SQLite database inside a hardened container.
+1. trusting an unsigned `alg:none` token;
+2. accepting a correctly signed but expired token; and
+3. verifying HS256 with a human-memorable secret that a fixed, bounded recovery exercise recovers
+   from a tiny built-in candidate list.
+
+All three reach the same protected operation — releasing held parcel `NPE-204` — while the secure
+application rejects them uniformly and preserves the parcel state. A correctly signed, unexpired
+dispatcher token succeeds in both applications, proving that the fix preserves legitimate use. The
+demonstration is fully simulated and local: it ships no general-purpose token forger or key-recovery
+tool, contacts no real system, and confines every state change to a disposable in-container database.
+
+The fixture identities are courier `river` and dispatcher `mara`. A dispatcher may release the held
+parcel; a courier is authenticated and then denied. All state lives in a disposable SQLite database
+inside a hardened container.
 
 ## What the verifier proves
 
@@ -18,20 +27,64 @@ instead:
 
 1. allows only configured `HS256`, independently of the received `alg` header;
 2. verifies the signature with a new process-local key containing at least 256 bits of entropy;
-3. requires and validates `iss`, `aud`, `sub`, `role`, `iat`, `nbf`, `exp`, and `jti` with zero leeway;
+3. requires and validates `iss`, `aud`, `sub`, `role`, `iat`, `nbf`, and `exp` with zero leeway and
+   requires `jti` for correlation;
 4. matches `sub` and `role` to the server-side fictional user record; and
 5. only then applies the shared dispatcher-only authorization rule.
 
-Authentication failures all return the same `401` response and Bearer challenge. The server emits
-one correlatable `token_rejected` event with a bounded internal reason, but never logs the compact
-token, Authorization header, signature, decoded claims, or key. A valid courier gets a generic `403`,
-which demonstrates that authentication and authorization are separate controls.
+Authentication failures all return the same `401` response and `WWW-Authenticate: Bearer` challenge.
+The server emits one correlatable `token_rejected` event with a bounded internal reason, but never
+logs the compact token, Authorization header, signature, decoded claims, or key. A valid courier gets
+a generic `403`, which demonstrates that authentication and authorization are separate controls.
 
-The vulnerable verifier deliberately makes two different incomplete decisions. For `alg:none`, it
-decodes and trusts attacker-written claims without verifying a signature. For HS256, it verifies the
+The vulnerable verifier deliberately makes three different incomplete decisions. For `alg:none`, it
+decodes and trusts attacker-written claims without verifying a signature. For HS256 it verifies the
 signature, issuer, audience, claim schema, not-before time, and server-side user/role match but omits
-the expiration check. Both paths then use the exact shared dispatcher authorization and parcel
-transaction code, so the demonstrated difference is authentication rather than authorization.
+the expiration check. And its HS256 signing key is a conspicuously fictional human-memorable secret
+that the fixed recovery exercise can guess from a tiny built-in candidate list. All three paths then
+use the exact shared dispatcher authorization and parcel transaction code, so the demonstrated
+difference is authentication rather than authorization.
+
+## The three vulnerable contrasts
+
+### 1. Unsigned-token path
+
+Starting from a courier token, the demo changes `sub` to `mara`, changes `role` to `dispatcher`,
+declares `alg:none`, and omits a signature. The vulnerable API accepts the attacker-written identity
+and releases the parcel; the secure API returns the uniform `401`, emits one generic event, and
+leaves the fixture state byte-for-byte unchanged.
+
+### 2. Expired-token path
+
+The demo uses a correctly signed dispatcher token whose `exp` is earlier than the verifier's
+controlled current time. The vulnerable API accepts it and releases the parcel; the secure API
+returns the same uniform `401` and preserves state. Boundary tests cover one instant before `exp`,
+exactly at `exp` (rejected by the secure app), and after `exp`.
+
+### 3. Weak-secret path and the bounded recovery exercise
+
+Given one fixed vulnerable-app courier token, the recovery exercise tests a tiny built-in list of
+conspicuously fictional candidate strings, recovers the vulnerable app's human-memorable HS256
+secret, forges one fixed dispatcher token, and releases the parcel in the vulnerable app.
+
+The exercise is deliberately bounded:
+
+- it accepts **exactly** the checked-in vulnerable courier token and **exactly one** checked-in
+  candidate list;
+- it tries each entry at most once and prints only the candidate count plus a labeled fictional
+  match;
+- it refuses altered or external tokens, alternate lists, command-line candidate values, paths,
+  URLs, stdin, plugins, and environment overrides **before** any candidate testing;
+- it performs no network request and exposes no reusable decoder, signer, forger, cracker, scanner,
+  or arbitrary output path;
+- it derives exactly one fixed forged dispatcher token for the local vulnerable fixture only and
+  clears in-memory candidate/key values when the case completes.
+
+The secure application's signing key is newly generated at process start with at least 256 bits of
+entropy and is never printed, returned, persisted, host-mounted, or exposed to the walkthrough. The
+same fixed candidate list therefore finds no match for a secure-app courier token, and the attempted
+weak-key forgery receives the uniform `401`, one generic redacted event, and byte-for-byte unchanged
+state — the strong-key counterproof.
 
 ## Run locally
 
@@ -56,7 +109,7 @@ docker compose exec secure python scripts/manual_case.py expired_dispatcher
 docker compose exec secure python scripts/manual_case.py unsigned_dispatcher
 ```
 
-## Run the two vulnerable contrasts
+## Run the three vulnerable contrasts
 
 The vulnerable API is local-only educational material. Starting it requires two deliberate actions:
 the `vulnerable` Compose profile and the exact `ALLOW_VULNERABLE_DEMO=true` environment value. Missing
@@ -73,11 +126,15 @@ ALLOW_VULNERABLE_DEMO=true docker compose --profile vulnerable run --rm --build 
 ALLOW_VULNERABLE_DEMO=true docker compose --profile vulnerable run --rm --build walkthrough expired
 ```
 
-The unsigned case changes the fixed courier claims from `river/courier` to `mara/dispatcher` and
-omits the signature. The expiration case uses a correctly signed dispatcher token whose `exp` is
-already past. In both cases the vulnerable API releases `NPE-204`; the secure API returns its uniform
-`401`, emits one generic correlatable event, and preserves byte-for-byte state. Stop and remove the
-disposable services with:
+The weak-secret recovery case is a separate fixed tool that needs no service. It runs with no
+network access, accepts no arguments, environment overrides, or stdin, and prints only the candidate
+count and the labeled fictional match:
+
+```sh
+docker compose --profile tools run --rm --build recovery
+```
+
+Stop and remove the disposable services with:
 
 ```sh
 docker compose --profile vulnerable down
@@ -92,24 +149,70 @@ docker compose exec secure python -c \
 
 Remove the service and ephemeral state with `docker compose down`.
 
+## Integrated walkthrough
+
+One command resets and runs, in fixed order, the unsigned impact/secure rejection, the expired
+impact/secure rejection, the weak-secret recovery/impact/strong-key counterproof, valid courier
+parity, and valid dispatcher parity:
+
+```sh
+ALLOW_VULNERABLE_DEMO=true docker compose --profile vulnerable run --rm --build integrated
+```
+
+It displays the relevant fictional decoded headers/claims, verifier and authorization verdicts, HTTP
+outcomes, audit-event presence, and before/after state while redacting compact tokens, signatures,
+keys, and Authorization headers. It finishes with a machine-checkable per-case and overall PASS/FAIL
+summary, exits nonzero on any unexpected result, and completes in under five minutes from a warm
+image cache.
+
+## Regression matrix
+
+The shared verification boundary proves at minimum:
+
+| Axis | Vulnerable app | Secure app |
+|---|---|---|
+| unsigned `alg:none` | impact: `200` release | uniform `401`, one event, unchanged state |
+| expired (before/at/after `exp`) | accepts on/after `exp` | rejects exactly at and after `exp` |
+| weak secret | fixed-list recovery, forgery, impact | no candidate match; forgery → uniform `401`, unchanged state |
+| malformed segments | — | uniform `401` |
+| unsupported algorithm | — | uniform `401` |
+| invalid signature | — | uniform `401` |
+| missing required claim | — | uniform `401` |
+| wrong issuer / wrong audience | — | uniform `401` |
+| not-yet-valid / future-issued | — | uniform `401` |
+| unknown subject / inconsistent role | — | uniform `401` |
+| valid courier | authenticated then identical `403` | authenticated then identical `403` |
+| valid dispatcher | identical `200` + release | identical `200` + release |
+| already-released conflict | identical `409` | identical `409` |
+| injected pre-commit failure | identical `500` + rollback | identical `500` + rollback |
+| containment / startup gates / drift | two opt-ins, no egress, shared routes | default only, hardened |
+
+Logs and walkthrough output contain no full compact token, Authorization header, signature, or key.
+
 ## Verify
 
 From a clean checkout, one command runs Ruff formatting/lint, strict mypy, Pytest coverage, the
-uniform rejection and redaction matrix, transaction tests, real-loopback HTTP checks, and static
-container-hardening and two-action startup-gate assertions:
+uniform rejection and redaction matrix, transaction tests, real-loopback HTTP checks, static
+container-hardening and startup-gate assertions, the recovery boundary tests, and the integrated
+walkthrough with its five-minute bound:
 
 ```sh
-docker compose run --rm verify
+ALLOW_VULNERABLE_DEMO=true docker compose --profile vulnerable run --rm --build integrated
 ```
 
-GitHub Actions invokes this same command. The tests cover malformed, unsigned, expired, wrongly
-signed, wrong-issuer/audience, not-yet-valid, future-issued, missing-claim, unknown-subject, and
-inconsistent-role tokens; valid courier and dispatcher behavior; already-released conflict; injected
-pre-commit rollback; exact expiration boundaries; fixture/reset behavior; and hardened defaults.
+For a fast test-only run, the same suite without the walkthrough is available as:
 
-This slice intentionally does not contain weak-secret recovery, candidate lists, token forging, or
-the final integrated walkthrough. The vulnerable verifier remains a narrowly isolated teaching
-component and accepts no arbitrary files, URLs, key material, or remote targets.
+```sh
+docker compose --profile tools run --rm --build verify
+```
+
+GitHub Actions invokes the integrated command on every push and pull request. The tests cover the
+three attack axes; expiration boundaries; malformed, unsigned, expired, wrongly signed,
+wrong-issuer/audience, not-yet-valid, future-issued, missing-claim, unknown-subject, and
+inconsistent-role tokens; valid courier and dispatcher behavior; already-released conflict; injected
+pre-commit rollback; recovery boundary refusals (altered/external tokens, arguments, environment
+overrides, stdin) and at-most-once candidate attempts; the strong-key counterproof; fixture/reset
+behavior; and hardened defaults.
 
 This repository is educational and local-only. It is not a complete authentication architecture and
 does not cover passwords, OAuth/OIDC, MFA, revocation, browser storage, TLS, deployment, or hosting.

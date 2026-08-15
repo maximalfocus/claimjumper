@@ -14,7 +14,5 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Build pinned verification image
-        run: docker compose build verify
-      - name: Run repository verification boundary
-        run: docker compose run --rm verify
+      - name: Run the complete local release gate
+        run: ALLOW_VULNERABLE_DEMO=true docker compose --profile vulnerable run --rm --build integrated

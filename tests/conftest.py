@@ -33,7 +33,6 @@ def vulnerable_client(tmp_path: Path) -> Iterator[TestClient]:
     application = create_app(
         database_url=f"sqlite:///{tmp_path / 'vulnerable.db'}",
         clock=fixed_clock(NOW),
-        verification_key=TEST_KEY,
         mode="vulnerable",
         allow_vulnerable=True,
     )
