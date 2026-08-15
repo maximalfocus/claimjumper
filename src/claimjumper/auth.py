@@ -8,6 +8,7 @@ from typing import Any, Final, Literal, cast
 import jwt
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from claimjumper.bounded_fixtures import FICTIONAL_WEAK_SECRET_BYTES
 from claimjumper.config import AUDIENCE, ISSUER, Clock
 from claimjumper.domain import USERS, Identity, Role
 
@@ -173,7 +174,11 @@ class SecureVerifier:
 
 
 class VulnerableVerifier(SecureVerifier):
-    """Deliberately incomplete local-only verifier for two fixed teaching cases."""
+    """Deliberately incomplete local-only verifier for three fixed teaching cases."""
+
+    def __init__(self, clock: Clock, key: bytes | None = None) -> None:
+        self._clock = clock
+        self._key = key if key is not None else FICTIONAL_WEAK_SECRET_BYTES
 
     def verify(self, compact_token: str) -> Identity:
         header = self._header(compact_token)

@@ -15,7 +15,7 @@ COPY src ./src
 COPY tests ./tests
 COPY scripts ./scripts
 COPY pyproject.toml uv.lock README.md compose.yaml Dockerfile ./
-RUN uv sync --frozen && chmod +x scripts/verify.sh
+RUN uv sync --frozen && chmod +x scripts/*.sh
 
 USER 65532:65532
 CMD ["uv", "run", "--no-sync", "uvicorn", "claimjumper.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
